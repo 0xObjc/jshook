@@ -24,7 +24,7 @@
     "skill"
   ],
   "author": "wuji1",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "@babel/generator": "^7.26.5",
