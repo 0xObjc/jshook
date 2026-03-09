@@ -24,6 +24,7 @@ import { SmartCodeCollector, type SmartCollectOptions } from './SmartCodeCollect
 import { CodeCompressor } from './CodeCompressor.js';
 // import { StreamingCollector } from './StreamingCollector.js'; // 暂不使用
 import { BrowserModeManager } from '../browser/BrowserModeManager.js';
+import * as http from 'node:http';
 
 export class CodeCollector {
   private config: PuppeteerConfig;
@@ -72,7 +73,7 @@ export class CodeCollector {
     this.MAX_FILES_CACHE_SIZE = 1000;  // 🆕 文件缓存最大1000个（防止内存泄漏）
 
     this.userAgent = config.userAgent ??
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
     // 初始化所有模块
     this.cache = new CodeCache();
@@ -213,6 +214,18 @@ export class CodeCollector {
   }
 
   /**
+   * 仅断开浏览器连接，保留已收集的数据（供 cleanup 使用）
+   */
+  async disconnect(): Promise<void> {
+    if (this.browser) {
+      await this.browserManager.close();
+      this.browser = null;
+      this.browserListenerAttached = false;
+      logger.info('Browser disconnected (data preserved)');
+    }
+  }
+
+  /**
    * 关闭浏览器并清理所有数据
    */
   async close(): Promise<void> {
@@ -241,17 +254,8 @@ export class CodeCollector {
       return managedPage;
     }
 
-    if (this.browser) {
-      const pages = await this.browser.pages();
-      const usablePages = pages.filter((page) => !page.isClosed());
-      if (usablePages.length > 0) {
-        const fallbackPage = usablePages[usablePages.length - 1];
-        if (fallbackPage && !fallbackPage.isClosed()) {
-          return fallbackPage;
-        }
-      }
-    }
-
+    // 跳过 browser.pages()：通过 Puppeteer WebSocket 调用 Target.getTargets 在外部 Chrome 上会挂死
+    // 直接创建新页面
     return await this.browserManager.newPage();
   }
 
@@ -281,54 +285,29 @@ export class CodeCollector {
     return page;
   }
 
-  /**
-   * 🆕 获取浏览器状态
-   *
-   * ✅ 修复：移除 isConnected() 的使用，使用 try-catch 检测浏览器状态
-   * 原因：isConnected() 已弃用，且在页面导航时可能误判
-   */
-  async getStatus(): Promise<{
-    running: boolean;
-    pagesCount: number;
-    version?: string;
-  }> {
-    if (!this.browser || !this.browser.isConnected()) {
-      const managedBrowser = this.browserManager.getBrowser();
-      if (managedBrowser && managedBrowser.isConnected()) {
-        this.browser = managedBrowser;
-      } else {
-        return {
-          running: false,
-          pagesCount: 0,
-        };
-      }
-    }
+  /** CDP HTTP API 获取浏览器数据（不挂死） */
+  private cdpHttpGet(urlPath: string): Promise<any> {
+    const baseUrl = (this.config.remoteDebuggingUrl || 'http://127.0.0.1:9222').replace(/\/$/, '');
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('CDP HTTP timeout')), 5000);
+      http.get(baseUrl + urlPath, (res) => {
+        let data = '';
+        res.on('data', (chunk: Buffer) => data += chunk.toString());
+        res.on('end', () => {
+          clearTimeout(timer);
+          try { resolve(JSON.parse(data)); } catch { resolve(data); }
+        });
+      }).on('error', (err) => { clearTimeout(timer); reject(err); });
+    });
+  }
 
-    // ✅ 修复：使用 try-catch 而不是 isConnected()
-    if (!this.browser) {
-      return {
-        running: false,
-        pagesCount: 0,
-      };
-    }
-
+  async getStatus(): Promise<{ running: boolean; pagesCount: number; version?: string }> {
     try {
-      // 尝试获取 pages，如果浏览器已关闭会抛出异常
-      const pages = await this.browser.pages();
-      const version = await this.browser.version();
-
-      return {
-        running: true,
-        pagesCount: pages.length,
-        version,
-      };
-    } catch (error) {
-      // 浏览器已关闭或连接断开
-      logger.debug('Browser not running or disconnected:', error);
-      return {
-        running: false,
-        pagesCount: 0,
-      };
+      const [targets, ver] = await Promise.all([this.cdpHttpGet('/json'), this.cdpHttpGet('/json/version')]);
+      const pages = Array.isArray(targets) ? targets.filter((t: any) => t.type === 'page') : [];
+      return { running: true, pagesCount: pages.length, version: ver?.Browser };
+    } catch {
+      return { running: false, pagesCount: 0 };
     }
   }
 

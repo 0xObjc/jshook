@@ -2043,15 +2043,17 @@ export class SkillRouter {
 
   async cleanup(): Promise<void> {
     logger.info('Cleaning up SkillRouter...');
-    this.hookManager.clearAll();
+    // 不清除 hooks 和已收集数据，仅断开 CDP/浏览器连接
+    // 数据仅在用户显式执行 clear 命令时清除
 
-    // 清理 debugger 模块的 CDP session
+    // 断开 debugger 模块的 CDP session
     try { await this.scriptManager.close(); } catch (e) { logger.warn('ScriptManager close failed:', e); }
     try { await this.runtimeInspector.close(); } catch (e) { logger.warn('RuntimeInspector close failed:', e); }
     try { await this.debuggerManager.close(); } catch (e) { logger.warn('DebuggerManager close failed:', e); }
 
-    await this.collector.close();
-    logger.info('SkillRouter cleaned up');
+    // 仅断开浏览器连接，保留已收集的数据
+    await this.collector.disconnect();
+    logger.info('SkillRouter cleaned up (data preserved)');
   }
 }
 

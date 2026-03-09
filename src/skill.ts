@@ -1,65 +1,135 @@
 #!/usr/bin/env node
 
 /**
- * JSHook Reverse Tool - Skill Entry Point
+ * JSHook Reverse Tool - Skill Entry Point (Thin Client)
+ *
+ * 通过 Unix Socket 连接后台 Daemon 进程执行命令。
+ * 如果 Daemon 未运行，自动在后台启动。
+ * 所有状态（浏览器连接、hooks、收集数据）由 Daemon 持久保持。
  */
 
-import { SkillRouter } from './skill/SkillRouter.js';
-import { getConfig, validateConfig } from './utils/config.js';
-import { logger } from './utils/logger.js';
+import * as net from 'node:net';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-interface AppError extends Error {
-  code?: string;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const SOCKET_PATH = path.join(process.env.TMPDIR || '/tmp', 'jshook-daemon.sock');
+const PID_FILE = path.join(process.env.TMPDIR || '/tmp', 'jshook-daemon.pid');
+const DAEMON_SCRIPT = path.join(__dirname, 'daemon.js');
+const DAEMON_READY_TIMEOUT_MS = 10_000;
+const DAEMON_POLL_INTERVAL_MS = 200;
+
+interface DaemonResponse {
+  success: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+/** 尝试连接 daemon，发送命令并返回结果 */
+function sendCommand(command: string, args: string[]): Promise<DaemonResponse> {
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(SOCKET_PATH, () => {
+      const payload = JSON.stringify({ command, args }) + '\n';
+      client.write(payload);
+    });
+
+    let buffer = '';
+    client.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const idx = buffer.indexOf('\n');
+      if (idx !== -1) {
+        const line = buffer.slice(0, idx);
+        client.end();
+        try {
+          resolve(JSON.parse(line));
+        } catch {
+          reject(new Error('Invalid daemon response'));
+        }
+      }
+    });
+
+    client.on('error', (err) => reject(err));
+    client.setTimeout(120_000, () => {
+      client.destroy();
+      reject(new Error('Daemon request timed out'));
+    });
+  });
+}
+
+/** 检查 daemon 是否存活 */
+async function isDaemonAlive(): Promise<boolean> {
+  try {
+    const resp = await sendCommand('__ping', []);
+    return resp.success === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 启动 daemon 并等待就绪 */
+async function ensureDaemon(): Promise<void> {
+  if (await isDaemonAlive()) return;
+
+  // 清理残留
+  try { fs.unlinkSync(SOCKET_PATH); } catch {}
+  try { fs.unlinkSync(PID_FILE); } catch {}
+
+  // 后台启动 daemon（detached + stdio ignore）
+  const child = spawn(process.execPath, [DAEMON_SCRIPT], {
+    detached: true,
+    stdio: 'ignore',
+    cwd: path.dirname(DAEMON_SCRIPT),
+    env: { ...process.env },
+  });
+  child.unref();
+
+  // 轮询等待 daemon 就绪
+  const deadline = Date.now() + DAEMON_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, DAEMON_POLL_INTERVAL_MS));
+    if (await isDaemonAlive()) return;
+  }
+
+  throw new Error('Daemon failed to start within timeout');
 }
 
 async function main() {
+  const args = process.argv.slice(2);
+
+  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+    printHelp();
+    process.exit(0);
+  }
+
   try {
-    const args = process.argv.slice(2);
+    await ensureDaemon();
 
-    if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
-      printHelp();
-      process.exit(0);
-    }
-
-    // 加载配置
-    const config = getConfig();
-
-    // 验证配置
-    const validation = validateConfig(config);
-    if (!validation.valid) {
-      logger.error('Configuration validation failed:');
-      validation.errors.forEach((error) => logger.error(`  - ${error}`));
-      process.exit(1);
-    }
-
-    // 创建路由器
-    const router = new SkillRouter(config);
-    await router.init();
-
-    // 执行命令
     const command = args[0];
     const commandArgs = args.slice(1);
 
-    const result = await router.execute(command, commandArgs);
+    const resp = await sendCommand(command, commandArgs);
 
-    // 输出结果
-    console.log(JSON.stringify(result, null, 2));
-
-    // 清理
-    await router.cleanup();
-
-    process.exit(0);
+    if (resp.success) {
+      console.log(JSON.stringify(resp.result, null, 2));
+    } else {
+      console.log(JSON.stringify({
+        success: false,
+        error: resp.error || 'Unknown daemon error',
+        code: 'DAEMON_ERROR',
+      }, null, 2));
+      process.exit(1);
+    }
   } catch (error) {
-    const appError = error as AppError;
-
-    logger.error('Skill execution failed:', appError.message);
-
+    const err = error as Error;
     console.log(JSON.stringify({
       success: false,
-      error: appError.message,
-      code: appError.code || 'UNKNOWN_ERROR'
+      error: err.message,
+      code: 'CLIENT_ERROR',
     }, null, 2));
-
     process.exit(1);
   }
 }
@@ -80,6 +150,10 @@ COMMANDS:
   browser <action>           Browser control (launch/close/status)
   stats                      Get statistics
   clear                      Clear collected data
+
+DAEMON COMMANDS:
+  __ping                     Check if daemon is running
+  __shutdown                 Shutdown the daemon
 
 OPTIONS:
   -h, --help                 Show this help message

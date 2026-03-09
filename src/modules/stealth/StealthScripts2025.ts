@@ -256,15 +256,15 @@ export class StealthScripts2025 {
   static resolveOptions(options: StealthInjectionOptions = {}): Required<
     Pick<StealthInjectionOptions, 'userAgent' | 'navigatorPlatform' | 'languages'>
   > & StealthInjectionOptions {
-    const preset = options.preset ?? 'windows-chrome';
-    const base = PRESETS[preset] ?? PRESETS['windows-chrome'];
+    const preset = options.preset ?? 'mac-chrome';
+    const base = PRESETS[preset] ?? PRESETS['mac-chrome'];
 
     return {
       ...base,
       ...options,
       // 保持预设中的值，除非用户显式覆盖
       userAgent: options.userAgent ?? base.userAgent ?? '',
-      navigatorPlatform: options.navigatorPlatform ?? base.navigatorPlatform ?? 'Win32',
+      navigatorPlatform: options.navigatorPlatform ?? base.navigatorPlatform ?? 'MacIntel',
       languages: options.languages ?? base.languages ?? ['en-US', 'en'],
     };
   }
@@ -279,7 +279,7 @@ export class StealthScripts2025 {
     const resolved = this.resolveOptions(options);
     this.currentOptions = resolved;
 
-    logger.info(`🛡️ Injecting stealth scripts (preset: ${options.preset ?? 'windows-chrome'})`);
+    logger.info(`🛡️ Injecting stealth scripts (preset: ${options.preset ?? 'mac-chrome'})`);
 
     const injected: string[] = [];
     const skipped: string[] = [];
@@ -391,7 +391,7 @@ export class StealthScripts2025 {
     logger.info(`✅ Stealth injected: ${injected.length} features, ${skipped.length} skipped`);
 
     return {
-      preset: options.preset ?? 'windows-chrome',
+      preset: options.preset ?? 'mac-chrome',
       injectedFeatures: injected,
       skippedFeatures: skipped,
       userAgent: resolved.userAgent!,
@@ -851,7 +851,7 @@ export class StealthScripts2025 {
    */
   static async setRealisticUserAgent(
     page: Page,
-    platform: 'windows' | 'mac' | 'linux' = 'windows',
+    platform: 'windows' | 'mac' | 'linux' = 'mac',
   ): Promise<void> {
     const presetMap: Record<string, StealthPreset> = {
       windows: 'windows-chrome',

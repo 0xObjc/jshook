@@ -34,7 +34,7 @@ export class BrowserModeManager {
     const port = config.remoteDebuggingPort ?? 9222;
     this.config = {
       useStealthScripts: config.useStealthScripts ?? true,
-      stealthPreset: config.stealthPreset ?? 'windows-chrome',
+      stealthPreset: config.stealthPreset ?? 'mac-chrome',
       remoteDebuggingUrl: config.remoteDebuggingUrl ?? `http://127.0.0.1:${port}`,
       autoLaunch: config.autoLaunch ?? true,
       browserPath: config.browserPath ?? '',
@@ -121,38 +121,22 @@ export class BrowserModeManager {
       return foundBrowsers;
     }
 
-    // 常见的浏览器安装路径模板
-    const browserTemplates = [
-      { name: 'Chrome', paths: [
-        'Google\\Chrome\\Application\\chrome.exe',
-        'Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      ]},
-      { name: 'Edge', paths: [
-        'Microsoft\\Edge\\Application\\msedge.exe',
-        'Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-        'Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-      ]},
+    // macOS 浏览器安装路径
+    const browserPaths = [
+      { name: 'Chrome', path: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' },
+      { name: 'Chrome (User)', path: `${process.env.HOME}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` },
+      { name: 'Edge', path: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' },
+      { name: 'Edge (User)', path: `${process.env.HOME}/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge` },
+      { name: 'Chromium', path: '/Applications/Chromium.app/Contents/MacOS/Chromium' },
     ];
 
-    // 检测所有可能的盘符（A-Z）
-    const driveLetters = 'CDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-
-    for (const drive of driveLetters) {
-      for (const template of browserTemplates) {
-        for (const browserPath of template.paths) {
-          const fullPath = `${drive}:\\${browserPath}`;
-          if (existsSync(fullPath)) {
-            // 避免重复添加
-            if (!foundBrowsers.some(b => b.path === fullPath)) {
-              foundBrowsers.push({
-                name: `${template.name} (${drive}:)`,
-                path: fullPath,
-              });
-              logger.info(`🔍 Found browser: ${template.name} at ${fullPath}`);
-            }
-          }
-        }
+    for (const browser of browserPaths) {
+      if (existsSync(browser.path)) {
+        foundBrowsers.push({
+          name: browser.name,
+          path: browser.path,
+        });
+        logger.info(`🔍 Found browser: ${browser.name} at ${browser.path}`);
       }
     }
 
@@ -192,14 +176,14 @@ export class BrowserModeManager {
           logger.error('❌ Failed to auto-launch browser:', launchError);
           throw new Error(
             `Failed to connect and auto-launch browser. ` +
-            `Please manually start your browser with: chrome.exe --remote-debugging-port=${this.config.remoteDebuggingPort}`
+            `Please manually start your browser with: /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=${this.config.remoteDebuggingPort}`
           );
         }
       } else {
         throw new Error(
           `Failed to connect to browser at ${this.config.remoteDebuggingUrl}. ` +
           `Please ensure your browser is running with remote debugging enabled. ` +
-          `Example: chrome.exe --remote-debugging-port=${this.config.remoteDebuggingPort}`
+          `Example: /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=${this.config.remoteDebuggingPort}`
         );
       }
     }
@@ -223,8 +207,8 @@ export class BrowserModeManager {
     await page.setJavaScriptEnabled(true);
 
     if (this.config.useStealthScripts) {
-      // 使用平台预设注入反检测脚本（默认 windows-chrome）
-      const preset = this.config.stealthPreset ?? 'windows-chrome';
+      // 使用平台预设注入反检测脚本（默认 mac-chrome）
+      const preset = this.config.stealthPreset ?? 'mac-chrome';
       await StealthScripts2025.injectAll(page, { preset });
     }
 
