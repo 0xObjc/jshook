@@ -254,8 +254,27 @@ export class CodeCollector {
       return managedPage;
     }
 
-    // 跳过 browser.pages()：通过 Puppeteer WebSocket 调用 Target.getTargets 在外部 Chrome 上会挂死
-    // 直接创建新页面
+    // 尝试复用已有页面（browser.targets() 是同步缓存，不会挂死）
+    if (this.browser) {
+      try {
+        const pageTargets = this.browser.targets().filter(t => t.type() === 'page');
+        if (pageTargets.length > 0) {
+          const target = pageTargets[pageTargets.length - 1];
+          // target.page() 可能挂死，加 5s 超时保护
+          const page = await Promise.race([
+            target.page(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+          ]);
+          if (page && !page.isClosed()) {
+            logger.info(`Reusing existing page: ${page.url()}`);
+            return page;
+          }
+        }
+      } catch (err) {
+        logger.debug('Failed to reuse existing page, creating new one');
+      }
+    }
+
     return await this.browserManager.newPage();
   }
 
