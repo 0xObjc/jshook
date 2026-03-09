@@ -52,6 +52,8 @@ export class SkillRouter {
     this.browserManager = new BrowserModeManager({
       useStealthScripts: config.puppeteer.useStealthScripts ?? true,
       remoteDebuggingUrl: config.puppeteer.remoteDebuggingUrl,
+      autoLaunch: config.puppeteer.autoLaunchExternalBrowser ?? true,
+      browserPath: config.puppeteer.externalBrowserPath,
     });
 
     // 初始化代码收集器

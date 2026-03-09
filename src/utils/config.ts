@@ -138,6 +138,7 @@ export function getConfig(): Config {
       anthropic: {
         apiKey: process.env.ANTHROPIC_API_KEY || '',
         model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
+        baseURL: process.env.ANTHROPIC_BASE_URL,
       },
     },
     puppeteer: {

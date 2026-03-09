@@ -63,6 +63,7 @@ export class LLMService {
     if (this.config.provider === 'anthropic' && this.config.anthropic?.apiKey) {
       this.anthropic = new Anthropic({
         apiKey: this.config.anthropic.apiKey,
+        ...(this.config.anthropic.baseURL ? { baseURL: this.config.anthropic.baseURL } : {}),
       });
       logger.info('Anthropic client initialized');
     }

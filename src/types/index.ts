@@ -26,6 +26,7 @@ export interface LLMConfig {
   anthropic?: {
     apiKey: string;
     model: string;
+    baseURL?: string;
   };
 }
 

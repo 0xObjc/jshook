@@ -1,6 +1,8 @@
 import type { Browser, Page } from 'puppeteer';
 import puppeteer from 'puppeteer';
 import { spawn, type ChildProcess } from 'child_process';
+import * as http from 'node:http';
+import * as path from 'node:path';
 import { existsSync } from 'fs';
 import { logger } from '../../utils/logger.js';
 import { StealthScripts2025, type StealthPreset } from '../stealth/StealthScripts2025.js';
@@ -69,8 +71,10 @@ export class BrowserModeManager {
     logger.info(`🚀 Launching browser: ${selectedBrowser.path}`);
     logger.info(`🔌 Remote debugging port: ${this.config.remoteDebuggingPort}`);
 
+    const userDataDir = path.join(process.env.TMPDIR || '/tmp', 'jshook-chrome-profile');
     const args = [
       `--remote-debugging-port=${this.config.remoteDebuggingPort}`,
+      `--user-data-dir=${userDataDir}`,
       '--no-first-run',
       '--no-default-browser-check',
     ];
@@ -84,20 +88,26 @@ export class BrowserModeManager {
     this.autoLaunched = true;
 
     // 等待浏览器启动
-    await this.waitForBrowser(5000);
+    await this.waitForBrowser(15000);
     logger.info('✅ Browser launched successfully');
   }
 
   /**
-   * 等待浏览器就绪
+   * 等待浏览器就绪（通过 CDP HTTP API 检测，避免 puppeteer.connect 挂死）
    */
   private async waitForBrowser(timeout: number): Promise<void> {
     const startTime = Date.now();
+    const url = this.config.remoteDebuggingUrl.replace(/\/$/, '') + '/json/version';
     while (Date.now() - startTime < timeout) {
       try {
-        await puppeteer.connect({
-          browserURL: this.config.remoteDebuggingUrl,
-        }).then(browser => browser.disconnect());
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('timeout')), 2000);
+          http.get(url, (res) => {
+            let d = '';
+            res.on('data', (c: Buffer) => d += c);
+            res.on('end', () => { clearTimeout(timer); resolve(); });
+          }).on('error', (e) => { clearTimeout(timer); reject(e); });
+        });
         return;
       } catch {
         await new Promise(resolve => setTimeout(resolve, 500));
